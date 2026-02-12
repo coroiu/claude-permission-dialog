@@ -167,35 +167,8 @@ RESULT=$(jq -n \
   '{"tool_name": $tool, "action": $action, "detail": $detail, "cwd": $cwd}' \
   | "$HOOK_DIR/permission-dialog")
 
-# Build the permissions.allow entry for "Always Allow"
-# Matches Claude Code's native format: "Bash(cmd:*)", "WebFetch(domain:host)", "Edit", "mcp__*"
-build_allow_entry() {
-  case "$TOOL_NAME" in
-    Bash)
-      local cmd binary
-      cmd=$(echo "$TOOL_INPUT" | jq -r '.command // ""')
-      binary=$(echo "$cmd" | awk '{print $1}')
-      if [ -n "$binary" ]; then
-        printf 'Bash(%s:*)' "$binary"
-      else
-        printf 'Bash'
-      fi
-      ;;
-    WebFetch)
-      local url domain
-      url=$(echo "$TOOL_INPUT" | jq -r '.url // ""')
-      domain=$(echo "$url" | sed -E 's|^https?://||' | sed 's|/.*||')
-      if [ -n "$domain" ]; then
-        printf 'WebFetch(domain:%s)' "$domain"
-      else
-        printf 'WebFetch'
-      fi
-      ;;
-    *)
-      printf '%s' "$TOOL_NAME"
-      ;;
-  esac
-}
+# Extract the first permission_suggestions entry for "Always Allow"
+SUGGESTIONS=$(echo "$INPUT" | jq '.permission_suggestions // []')
 
 case "$RESULT" in
   allow)
@@ -207,12 +180,11 @@ case "$RESULT" in
     }'
     ;;
   allow_always)
-    ENTRY=$(build_allow_entry)
-    jq -n --arg entry "$ENTRY" '{
+    jq -n --argjson perms "$SUGGESTIONS" '{
       hookSpecificOutput: {
         hookEventName: "PermissionRequest",
         behavior: "allow",
-        updatedPermissions: [$entry]
+        updatedPermissions: $perms
       }
     }'
     ;;

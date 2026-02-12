@@ -40,6 +40,7 @@ class PermissionDialog: NSObject, NSApplicationDelegate {
 
     let options: [OptionRow] = [
         OptionRow(label: "Allow", shortcut: "\u{23CE}", icon: "checkmark.circle", value: "allow"),
+        OptionRow(label: "Always Allow", shortcut: "\u{2318}A", icon: "checkmark.circle.badge.checkmark", value: "allow_always"),
         OptionRow(label: "Deny", shortcut: "\u{238B}", icon: "xmark.circle", value: "deny"),
     ]
     var selectedIndex = 0

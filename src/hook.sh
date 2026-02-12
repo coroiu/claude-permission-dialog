@@ -167,22 +167,63 @@ RESULT=$(jq -n \
   '{"tool_name": $tool, "action": $action, "detail": $detail, "cwd": $cwd}' \
   | "$HOOK_DIR/permission-dialog")
 
-if [ "$RESULT" = "allow" ]; then
-  jq -n '{
-    hookSpecificOutput: {
-      hookEventName: "PermissionRequest",
-      permissionDecision: "allow",
-      permissionDecisionReason: "Approved via macOS dialog"
-    }
-  }'
-  exit 0
-else
-  jq -n '{
-    hookSpecificOutput: {
-      hookEventName: "PermissionRequest",
-      permissionDecision: "deny",
-      permissionDecisionReason: "Denied via macOS dialog"
-    }
-  }'
-  exit 0
-fi
+# Build the permissions.allow entry for "Always Allow"
+# Matches Claude Code's native format: "Bash(cmd:*)", "WebFetch(domain:host)", "Edit", "mcp__*"
+build_allow_entry() {
+  case "$TOOL_NAME" in
+    Bash)
+      local cmd binary
+      cmd=$(echo "$TOOL_INPUT" | jq -r '.command // ""')
+      binary=$(echo "$cmd" | awk '{print $1}')
+      if [ -n "$binary" ]; then
+        printf 'Bash(%s:*)' "$binary"
+      else
+        printf 'Bash'
+      fi
+      ;;
+    WebFetch)
+      local url domain
+      url=$(echo "$TOOL_INPUT" | jq -r '.url // ""')
+      domain=$(echo "$url" | sed -E 's|^https?://||' | sed 's|/.*||')
+      if [ -n "$domain" ]; then
+        printf 'WebFetch(domain:%s)' "$domain"
+      else
+        printf 'WebFetch'
+      fi
+      ;;
+    *)
+      printf '%s' "$TOOL_NAME"
+      ;;
+  esac
+}
+
+case "$RESULT" in
+  allow)
+    jq -n '{
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        behavior: "allow"
+      }
+    }'
+    ;;
+  allow_always)
+    ENTRY=$(build_allow_entry)
+    jq -n --arg entry "$ENTRY" '{
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        behavior: "allow",
+        updatedPermissions: [$entry]
+      }
+    }'
+    ;;
+  *)
+    jq -n '{
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        behavior: "deny",
+        message: "Denied via macOS dialog"
+      }
+    }'
+    ;;
+esac
+exit 0

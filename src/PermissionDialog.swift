@@ -4,12 +4,24 @@ import Cocoa
 // Input (stdin JSON): { "tool_name", "action", "detail", "cwd" }
 // Prints "allow" or "deny" to stdout.
 
-// Custom view to intercept arrow keys and Enter for Spotlight-style row selection
+// Panel that accepts key input without requiring app activation (like Spotlight)
+class KeyPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
+// Text view that never steals first responder from the key handler
+class PassthroughTextView: NSTextView {
+    override var acceptsFirstResponder: Bool { false }
+}
+
+// Custom view to intercept arrow keys, Enter, and mouse clicks for Spotlight-style row selection
 class KeyHandlerView: NSView {
     var onArrowUp: (() -> Void)?
     var onArrowDown: (() -> Void)?
     var onConfirm: (() -> Void)?
     var onEscape: (() -> Void)?
+    var onRowClick: ((Int) -> Void)?
+    var rowFrames: [NSRect] = []
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -21,6 +33,18 @@ class KeyHandlerView: NSView {
         case 53:  onEscape?()     // escape
         default: super.keyDown(with: event)
         }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let loc = convert(event.locationInWindow, from: nil)
+        for (i, frame) in rowFrames.enumerated() {
+            if frame.contains(loc) {
+                onRowClick?(i)
+                return
+            }
+        }
+        // Click outside rows — just reclaim first responder
+        window?.makeFirstResponder(self)
     }
 }
 
@@ -83,10 +107,10 @@ class PermissionDialog: NSObject, NSApplicationDelegate {
         let x = (screenFrame.width - width) / 2
         let y = (screenFrame.height - totalHeight) / 2 + 140
 
-        // --- Window ---
-        window = NSWindow(
+        // --- Window (non-activating panel receives keys without stealing app focus) ---
+        window = KeyPanel(
             contentRect: NSRect(x: x, y: y, width: width, height: totalHeight),
-            styleMask: [.titled, .fullSizeContentView],
+            styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -109,6 +133,10 @@ class PermissionDialog: NSObject, NSApplicationDelegate {
         keyHandler.onConfirm = { [weak self] in self?.confirmSelection() }
         keyHandler.onEscape = { [weak self] in
             self?.selectedIndex = self?.options.firstIndex(where: { $0.value == "deny" }) ?? 1
+            self?.confirmSelection()
+        }
+        keyHandler.onRowClick = { [weak self] index in
+            self?.selectedIndex = index
             self?.confirmSelection()
         }
 
@@ -170,9 +198,9 @@ class PermissionDialog: NSObject, NSApplicationDelegate {
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
 
-        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: width, height: detailHeight))
+        let textView = PassthroughTextView(frame: NSRect(x: 0, y: 0, width: width, height: detailHeight))
         textView.isEditable = false
-        textView.isSelectable = true
+        textView.isSelectable = false
         textView.font = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
         textView.textColor = NSColor.labelColor
         textView.string = detail
@@ -230,6 +258,12 @@ class PermissionDialog: NSObject, NSApplicationDelegate {
             shortcutFields.append(shortcut)
         }
 
+        // Register row frames for click detection (in keyHandler coordinates)
+        for (i, _) in options.enumerated() {
+            let rowY = footerHeight + optionsHeight - rowHeight * CGFloat(i + 1)
+            keyHandler.rowFrames.append(NSRect(x: 0, y: rowY, width: width, height: rowHeight))
+        }
+
         // ============================================================
         // SEPARATOR above footer
         // ============================================================
@@ -264,9 +298,9 @@ class PermissionDialog: NSObject, NSApplicationDelegate {
         // --- Apply initial selection highlight ---
         updateSelection()
 
-        // --- Show and activate ---
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        // --- Show panel (non-activating: receives keys without stealing app focus) ---
+        window.orderFrontRegardless()
+        window.makeKey()
         window.makeFirstResponder(keyHandler)
     }
 

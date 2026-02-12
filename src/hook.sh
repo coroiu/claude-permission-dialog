@@ -175,7 +175,9 @@ case "$RESULT" in
     jq -n '{
       hookSpecificOutput: {
         hookEventName: "PermissionRequest",
-        behavior: "allow"
+        decision: {
+          behavior: "allow"
+        }
       }
     }'
     ;;
@@ -183,8 +185,10 @@ case "$RESULT" in
     jq -n --argjson perms "$SUGGESTIONS" '{
       hookSpecificOutput: {
         hookEventName: "PermissionRequest",
-        behavior: "allow",
-        updatedPermissions: $perms
+        decision: {
+          behavior: "allow",
+          updatedPermissions: $perms
+        }
       }
     }'
     ;;
@@ -192,8 +196,10 @@ case "$RESULT" in
     jq -n '{
       hookSpecificOutput: {
         hookEventName: "PermissionRequest",
-        behavior: "deny",
-        message: "Denied via macOS dialog"
+        decision: {
+          behavior: "deny",
+          message: "Denied via macOS dialog"
+        }
       }
     }'
     ;;

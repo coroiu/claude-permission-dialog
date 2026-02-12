@@ -21,68 +21,119 @@ class PermissionDialog: NSObject, NSApplicationDelegate {
             cwd = json["cwd"] as? String ?? ""
         }
 
-        let width: CGFloat = 560
+        let width: CGFloat = 580
         let height: CGFloat = 380
         let screenFrame = NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
         let x = (screenFrame.width - width) / 2
         let y = (screenFrame.height - height) / 2 + 100
 
+        // 1. Sleek titlebar
         window = NSWindow(
             contentRect: NSRect(x: x, y: y, width: width, height: height),
-            styleMask: [.titled],
+            styleMask: [.titled, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        window.title = "Claude Code Permission"
+        window.title = "Claude permission request"
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .visible
+        window.isMovableByWindowBackground = true
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.isReleasedWhenClosed = false
-        window.backgroundColor = NSColor.windowBackgroundColor
 
-        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
-        var yPos = height - 16.0
+        // 6. NSVisualEffectView background
+        let visualEffect = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        visualEffect.material = .hudWindow
+        visualEffect.blendingMode = .behindWindow
+        visualEffect.state = .active
+        window.contentView = visualEffect
+
+        var yPos = height - 38.0  // extra top padding for titlebar inset
 
         // -- Project / working directory bar --
         let projectName = extractProjectName(from: cwd)
         let cwdDisplay = abbreviateHome(cwd)
 
         yPos -= 20
-        let projectLabel = NSTextField(labelWithString: "\(projectName)  \u{2014}  \(cwdDisplay)")
+        let projectLabel = NSTextField(labelWithString: "")
         projectLabel.frame = NSRect(x: 20, y: yPos, width: width - 40, height: 18)
         projectLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         projectLabel.textColor = NSColor.secondaryLabelColor
         projectLabel.lineBreakMode = .byTruncatingMiddle
-        contentView.addSubview(projectLabel)
+
+        // Project label with folder icon prefix
+        let projectString = NSMutableAttributedString()
+        let folderAttachment = NSTextAttachment()
+        if let folderImage = NSImage(systemSymbolName: "folder", accessibilityDescription: nil) {
+            let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+            folderAttachment.image = folderImage.withSymbolConfiguration(config)
+        }
+        let folderStr = NSAttributedString(attachment: folderAttachment)
+        projectString.append(folderStr)
+        projectString.append(NSAttributedString(string: " \(projectName)  \u{2014}  \(cwdDisplay)", attributes: [
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: NSColor.secondaryLabelColor
+        ]))
+        projectLabel.attributedStringValue = projectString
+        visualEffect.addSubview(projectLabel)
 
         // -- Separator --
         yPos -= 10
         let separator = NSBox(frame: NSRect(x: 20, y: yPos, width: width - 40, height: 1))
         separator.boxType = .separator
-        contentView.addSubview(separator)
+        visualEffect.addSubview(separator)
 
-        // -- Icon + action description --
-        yPos -= 40
-        let iconView = NSImageView(frame: NSRect(x: 20, y: yPos, width: 36, height: 36))
-        iconView.image = NSImage(named: NSImage.cautionName)
-        contentView.addSubview(iconView)
+        // 2. SF Symbol icon per tool type + action label (vertically centered)
+        yPos -= 8
 
         let actionLabel = NSTextField(wrappingLabelWithString: action)
-        actionLabel.frame = NSRect(x: 64, y: yPos - 4, width: width - 84, height: 44)
         actionLabel.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
-        actionLabel.maximumNumberOfLines = 2
-        actionLabel.lineBreakMode = .byTruncatingTail
-        contentView.addSubview(actionLabel)
+        actionLabel.lineBreakMode = .byWordWrapping
+        actionLabel.maximumNumberOfLines = 0
+        let textMaxWidth = width - 84
+        let textSize = actionLabel.sizeThatFits(NSSize(width: textMaxWidth, height: CGFloat.greatestFiniteMagnitude))
+        let textHeight = max(textSize.height, 20)
 
-        // -- Detail in a scroll view --
+        let iconSize: CGFloat = 36
+        let blockHeight = max(iconSize, textHeight)
+
+        yPos -= blockHeight
+
+        let iconView = NSImageView(frame: NSRect(x: 20, y: yPos + (blockHeight - iconSize) / 2, width: iconSize, height: iconSize))
+        let symbolName = sfSymbolName(for: toolName)
+        if let symbolImage = NSImage(systemSymbolName: symbolName, accessibilityDescription: toolName) {
+            let config = NSImage.SymbolConfiguration(pointSize: 24, weight: .medium)
+            iconView.image = symbolImage.withSymbolConfiguration(config)
+            iconView.contentTintColor = NSColor.secondaryLabelColor
+        }
+        visualEffect.addSubview(iconView)
+
+        actionLabel.frame = NSRect(x: 64, y: yPos + (blockHeight - textHeight) / 2, width: textMaxWidth, height: textHeight)
+        visualEffect.addSubview(actionLabel)
+
+        // 4. Rounded detail area
         let detailTop = yPos - 12
-        let detailHeight = detailTop - 64.0  // leave room for buttons
+        let detailHeight = max(detailTop - 64.0, 80)
 
-        let scrollView = NSScrollView(frame: NSRect(x: 20, y: 64, width: width - 40, height: detailHeight))
+        // Container with rounded corners and subtle border
+        let detailContainer = NSView(frame: NSRect(x: 20, y: 64, width: width - 40, height: detailHeight))
+        detailContainer.wantsLayer = true
+        detailContainer.layer?.cornerRadius = 8
+        detailContainer.layer?.borderColor = NSColor.separatorColor.cgColor
+        detailContainer.layer?.borderWidth = 0.5
+        detailContainer.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+        detailContainer.layer?.masksToBounds = true
+        visualEffect.addSubview(detailContainer)
+
+        let scrollView = NSScrollView(frame: detailContainer.bounds)
         scrollView.hasVerticalScroller = true
-        scrollView.borderType = .bezelBorder
+        scrollView.borderType = .noBorder
         scrollView.autohidesScrollers = true
+        scrollView.autoresizingMask = [.width, .height]
+        scrollView.drawsBackground = false
 
-        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: width - 56, height: detailHeight))
+        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: detailContainer.bounds.width - 16, height: detailHeight))
         textView.isEditable = false
         textView.isSelectable = true
         textView.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
@@ -91,34 +142,61 @@ class PermissionDialog: NSObject, NSApplicationDelegate {
         textView.isVerticallyResizable = true
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
+        textView.drawsBackground = false
 
         scrollView.documentView = textView
-        contentView.addSubview(scrollView)
+        detailContainer.addSubview(scrollView)
 
-        // -- Buttons --
-        let allowButton = NSButton(frame: NSRect(x: width - 130, y: 16, width: 110, height: 36))
-        allowButton.title = "Allow  \u{23CE}"
-        allowButton.bezelStyle = .rounded
+        // 3. Accent-colored Allow button
+        let allowButton = NSButton(frame: NSRect(x: width - 130, y: 16, width: 110, height: 32))
+        allowButton.title = ""
+        allowButton.isBordered = false
+        allowButton.wantsLayer = true
+        allowButton.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+        allowButton.layer?.cornerRadius = 6
+        allowButton.attributedTitle = NSAttributedString(string: "Allow  \u{23CE}", attributes: [
+            .font: NSFont.systemFont(ofSize: 13, weight: .medium),
+            .foregroundColor: NSColor.white
+        ])
         allowButton.keyEquivalent = "\r"
         allowButton.target = self
         allowButton.action = #selector(allow)
-        allowButton.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-        contentView.addSubview(allowButton)
+        visualEffect.addSubview(allowButton)
 
-        let denyButton = NSButton(frame: NSRect(x: width - 250, y: 16, width: 110, height: 36))
-        denyButton.title = "Deny  \u{238B}"
-        denyButton.bezelStyle = .rounded
+        // Subtle Deny button
+        let denyButton = NSButton(frame: NSRect(x: width - 250, y: 16, width: 110, height: 32))
+        denyButton.title = ""
+        denyButton.isBordered = false
+        denyButton.wantsLayer = true
+        denyButton.layer?.backgroundColor = NSColor.controlColor.cgColor
+        denyButton.layer?.cornerRadius = 6
+        denyButton.attributedTitle = NSAttributedString(string: "Deny  \u{238B}", attributes: [
+            .font: NSFont.systemFont(ofSize: 13, weight: .regular),
+            .foregroundColor: NSColor.controlTextColor
+        ])
         denyButton.keyEquivalent = "\u{1b}"
         denyButton.target = self
         denyButton.action = #selector(deny)
-        denyButton.font = NSFont.systemFont(ofSize: 13, weight: .regular)
-        contentView.addSubview(denyButton)
+        visualEffect.addSubview(denyButton)
 
-        window.contentView = contentView
         window.makeKeyAndOrderFront(nil)
 
         NSApp.activate(ignoringOtherApps: true)
         window.makeFirstResponder(window.contentView)
+    }
+
+    /// Map tool names to SF Symbol names
+    func sfSymbolName(for tool: String) -> String {
+        let lowered = tool.lowercased()
+        if lowered == "bash" { return "terminal" }
+        if lowered == "edit" || lowered == "write" { return "doc.text" }
+        if lowered == "read" { return "doc" }
+        if lowered == "webfetch" || lowered == "websearch" { return "globe" }
+        if lowered == "grep" { return "magnifyingglass" }
+        if lowered == "glob" { return "doc.text.magnifyingglass" }
+        if lowered == "task" { return "cpu" }
+        if lowered.hasPrefix("mcp") { return "puzzlepiece" }
+        return "questionmark.circle"
     }
 
     /// Extract a project name from the cwd (last path component, or second-to-last if inside a subfolder)

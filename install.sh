@@ -46,16 +46,16 @@ HOOK_CONFIG='{
 }'
 
 if [ -f "$SETTINGS_FILE" ]; then
-  # Check if hooks.PreToolUse already has our hook
-  if jq -e '.hooks.PreToolUse[]? | select(.hooks[]?.command == "~/.claude/hooks/permission-dialog.sh")' "$SETTINGS_FILE" &>/dev/null; then
+  # Check if hooks.PermissionRequest already has our hook
+  if jq -e '.hooks.PermissionRequest[]? | select(.hooks[]?.command == "~/.claude/hooks/permission-dialog.sh")' "$SETTINGS_FILE" &>/dev/null; then
     echo ""
     echo "==> Hook already configured in $SETTINGS_FILE, skipping."
   else
     # Add our hook to the existing settings
     UPDATED=$(jq --argjson hook "$HOOK_CONFIG" '
       .hooks //= {} |
-      .hooks.PreToolUse //= [] |
-      .hooks.PreToolUse += [$hook]
+      .hooks.PermissionRequest //= [] |
+      .hooks.PermissionRequest += [$hook]
     ' "$SETTINGS_FILE")
     echo "$UPDATED" > "$SETTINGS_FILE"
     echo ""
@@ -66,7 +66,7 @@ else
   mkdir -p "$(dirname "$SETTINGS_FILE")"
   jq -n --argjson hook "$HOOK_CONFIG" '{
     hooks: {
-      PreToolUse: [$hook]
+      PermissionRequest: [$hook]
     }
   }' > "$SETTINGS_FILE"
   echo ""

@@ -170,7 +170,7 @@ RESULT=$(jq -n \
 if [ "$RESULT" = "allow" ]; then
   jq -n '{
     hookSpecificOutput: {
-      hookEventName: "PreToolUse",
+      hookEventName: "PermissionRequest",
       permissionDecision: "allow",
       permissionDecisionReason: "Approved via macOS dialog"
     }
@@ -179,7 +179,7 @@ if [ "$RESULT" = "allow" ]; then
 else
   jq -n '{
     hookSpecificOutput: {
-      hookEventName: "PreToolUse",
+      hookEventName: "PermissionRequest",
       permissionDecision: "deny",
       permissionDecisionReason: "Denied via macOS dialog"
     }

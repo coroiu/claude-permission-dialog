@@ -16,10 +16,10 @@ echo "    Removed: $INSTALL_DIR/permission-dialog.sh"
 # Remove hook from settings
 if [ -f "$SETTINGS_FILE" ]; then
   UPDATED=$(jq '
-    if .hooks.PreToolUse then
-      .hooks.PreToolUse |= map(select(.hooks[]?.command != "~/.claude/hooks/permission-dialog.sh"))
+    if .hooks.PermissionRequest then
+      .hooks.PermissionRequest |= map(select(.hooks[]?.command != "~/.claude/hooks/permission-dialog.sh"))
     else . end |
-    if .hooks.PreToolUse == [] then del(.hooks.PreToolUse) else . end |
+    if .hooks.PermissionRequest == [] then del(.hooks.PermissionRequest) else . end |
     if .hooks == {} then del(.hooks) else . end
   ' "$SETTINGS_FILE")
   echo "$UPDATED" > "$SETTINGS_FILE"

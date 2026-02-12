@@ -4,12 +4,49 @@ import Cocoa
 // Input (stdin JSON): { "tool_name", "action", "detail", "cwd" }
 // Prints "allow" or "deny" to stdout.
 
+// Custom view to intercept arrow keys and Enter for Spotlight-style row selection
+class KeyHandlerView: NSView {
+    var onArrowUp: (() -> Void)?
+    var onArrowDown: (() -> Void)?
+    var onConfirm: (() -> Void)?
+    var onEscape: (() -> Void)?
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        switch event.keyCode {
+        case 126: onArrowUp?()    // up arrow
+        case 125: onArrowDown?()  // down arrow
+        case 36:  onConfirm?()    // return
+        case 53:  onEscape?()     // escape
+        default: super.keyDown(with: event)
+        }
+    }
+}
+
+struct OptionRow {
+    let label: String
+    let shortcut: String
+    let icon: String
+    let value: String  // what gets printed to stdout
+}
+
 class PermissionDialog: NSObject, NSApplicationDelegate {
     var toolName: String = "Unknown"
     var action: String = ""
     var detail: String = ""
     var cwd: String = ""
     var window: NSWindow!
+
+    let options: [OptionRow] = [
+        OptionRow(label: "Allow", shortcut: "\u{23CE}", icon: "checkmark.circle", value: "allow"),
+        OptionRow(label: "Deny", shortcut: "\u{238B}", icon: "xmark.circle", value: "deny"),
+    ]
+    var selectedIndex = 0
+    var rowViews: [NSView] = []
+    var labelFields: [NSTextField] = []
+    var shortcutFields: [NSTextField] = []
+    var iconViews: [NSImageView] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let data = FileHandle.standardInput.availableData as Data?,
@@ -22,12 +59,14 @@ class PermissionDialog: NSObject, NSApplicationDelegate {
 
         let width: CGFloat = 680
         let padding: CGFloat = 16
-        let footerHeight: CGFloat = 44
+        let rowHeight: CGFloat = 36
+        let footerHeight: CGFloat = 32
+        let optionsHeight = rowHeight * CGFloat(options.count)
         let screenFrame = NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
 
         // --- Measure action text to compute dynamic height ---
         let actionFont = NSFont.systemFont(ofSize: 16, weight: .medium)
-        let textAreaWidth = width - padding - 32 - 12 - padding  // left pad + icon + gap + right pad
+        let textAreaWidth = width - padding - 32 - 12 - padding
         let measureLabel = NSTextField(wrappingLabelWithString: action)
         measureLabel.font = actionFont
         measureLabel.maximumNumberOfLines = 0
@@ -37,13 +76,13 @@ class PermissionDialog: NSObject, NSApplicationDelegate {
         let iconSize: CGFloat = 32
         let topBlockHeight = max(iconSize, actionHeight)
         let topSectionHeight = padding + topBlockHeight + padding
-        let detailHeight: CGFloat = 200
-        let totalHeight = topSectionHeight + 1 + detailHeight + 1 + footerHeight
+        let detailHeight: CGFloat = 180
+        let totalHeight = topSectionHeight + 1 + detailHeight + 1 + optionsHeight + 1 + footerHeight
 
         let x = (screenFrame.width - width) / 2
-        let y = (screenFrame.height - totalHeight) / 2 + 140  // upper third like Spotlight
+        let y = (screenFrame.height - totalHeight) / 2 + 140
 
-        // --- Window: titled but chrome-free (ensures text rendering works) ---
+        // --- Window ---
         window = NSWindow(
             contentRect: NSRect(x: x, y: y, width: width, height: totalHeight),
             styleMask: [.titled, .fullSizeContentView],
@@ -58,36 +97,44 @@ class PermissionDialog: NSObject, NSApplicationDelegate {
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.isReleasedWhenClosed = false
         window.hasShadow = true
-
-        // Hide the titlebar buttons (close/minimize/zoom)
         window.standardWindowButton(.closeButton)?.isHidden = true
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
 
+        // --- Key handler as content view base ---
+        let keyHandler = KeyHandlerView(frame: NSRect(x: 0, y: 0, width: width, height: totalHeight))
+        keyHandler.onArrowUp = { [weak self] in self?.moveSelection(-1) }
+        keyHandler.onArrowDown = { [weak self] in self?.moveSelection(1) }
+        keyHandler.onConfirm = { [weak self] in self?.confirmSelection() }
+        keyHandler.onEscape = { [weak self] in
+            self?.selectedIndex = self?.options.firstIndex(where: { $0.value == "deny" }) ?? 1
+            self?.confirmSelection()
+        }
+
         // --- Frosted glass background ---
-        let visualEffect = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: width, height: totalHeight))
+        let visualEffect = NSVisualEffectView(frame: keyHandler.bounds)
         visualEffect.material = .popover
         visualEffect.blendingMode = .behindWindow
         visualEffect.state = .active
-        window.contentView = visualEffect
+        keyHandler.addSubview(visualEffect)
+        window.contentView = keyHandler
 
         // ============================================================
         // TOP SECTION: icon + action description
         // ============================================================
         let topY = totalHeight - topSectionHeight
 
-        let iconView = NSImageView(frame: NSRect(
-            x: padding,
-            y: topY + (topSectionHeight - iconSize) / 2,
+        let toolIconView = NSImageView(frame: NSRect(
+            x: padding, y: topY + (topSectionHeight - iconSize) / 2,
             width: iconSize, height: iconSize
         ))
         let symbolName = sfSymbolName(for: toolName)
         if let img = NSImage(systemSymbolName: symbolName, accessibilityDescription: toolName) {
             let config = NSImage.SymbolConfiguration(pointSize: 20, weight: .medium)
-            iconView.image = img.withSymbolConfiguration(config)
-            iconView.contentTintColor = NSColor.secondaryLabelColor
+            toolIconView.image = img.withSymbolConfiguration(config)
+            toolIconView.contentTintColor = NSColor.secondaryLabelColor
         }
-        visualEffect.addSubview(iconView)
+        visualEffect.addSubview(toolIconView)
 
         let actionLabel = NSTextField(wrappingLabelWithString: action)
         actionLabel.font = actionFont
@@ -107,14 +154,14 @@ class PermissionDialog: NSObject, NSApplicationDelegate {
         // ============================================================
         // SEPARATOR
         // ============================================================
-        let sep = NSBox(frame: NSRect(x: 0, y: topY, width: width, height: 1))
-        sep.boxType = .separator
-        visualEffect.addSubview(sep)
+        let sep1 = NSBox(frame: NSRect(x: 0, y: topY, width: width, height: 1))
+        sep1.boxType = .separator
+        visualEffect.addSubview(sep1)
 
         // ============================================================
-        // DETAIL AREA: scrollable command/content preview
+        // DETAIL AREA
         // ============================================================
-        let detailY = footerHeight + 1
+        let detailY = footerHeight + 1 + optionsHeight + 1
 
         let scrollView = NSScrollView(frame: NSRect(x: 0, y: detailY, width: width, height: detailHeight))
         scrollView.hasVerticalScroller = true
@@ -138,18 +185,65 @@ class PermissionDialog: NSObject, NSApplicationDelegate {
         visualEffect.addSubview(scrollView)
 
         // ============================================================
-        // FOOTER: project info (left) + buttons (right)
+        // SEPARATOR above options
         // ============================================================
-        let footerSep = NSBox(frame: NSRect(x: 0, y: footerHeight, width: width, height: 1))
-        footerSep.boxType = .separator
-        visualEffect.addSubview(footerSep)
+        let sep2 = NSBox(frame: NSRect(x: 0, y: footerHeight + optionsHeight + 1, width: width, height: 1))
+        sep2.boxType = .separator
+        visualEffect.addSubview(sep2)
 
-        // Project label with folder icon
+        // ============================================================
+        // OPTION ROWS (Spotlight-style selectable list)
+        // ============================================================
+        for (i, option) in options.enumerated() {
+            let rowY = footerHeight + optionsHeight - rowHeight * CGFloat(i + 1)
+
+            // Row background (highlight container)
+            let rowBg = NSView(frame: NSRect(x: 4, y: rowY + 2, width: width - 8, height: rowHeight - 4))
+            rowBg.wantsLayer = true
+            rowBg.layer?.cornerRadius = 6
+            visualEffect.addSubview(rowBg)
+            rowViews.append(rowBg)
+
+            // Row icon
+            let rowIcon = NSImageView(frame: NSRect(x: padding + 4, y: rowY + (rowHeight - 18) / 2, width: 18, height: 18))
+            if let img = NSImage(systemSymbolName: option.icon, accessibilityDescription: option.label) {
+                let cfg = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+                rowIcon.image = img.withSymbolConfiguration(cfg)
+            }
+            visualEffect.addSubview(rowIcon)
+            iconViews.append(rowIcon)
+
+            // Row label
+            let label = NSTextField(labelWithString: option.label)
+            label.frame = NSRect(x: padding + 28, y: rowY + (rowHeight - 20) / 2, width: width - 140, height: 20)
+            label.font = NSFont.systemFont(ofSize: 14, weight: .regular)
+            visualEffect.addSubview(label)
+            labelFields.append(label)
+
+            // Shortcut hint
+            let shortcut = NSTextField(labelWithString: option.shortcut)
+            shortcut.frame = NSRect(x: width - padding - 30, y: rowY + (rowHeight - 18) / 2, width: 30, height: 18)
+            shortcut.font = NSFont.systemFont(ofSize: 12, weight: .regular)
+            shortcut.alignment = .right
+            visualEffect.addSubview(shortcut)
+            shortcutFields.append(shortcut)
+        }
+
+        // ============================================================
+        // SEPARATOR above footer
+        // ============================================================
+        let sep3 = NSBox(frame: NSRect(x: 0, y: footerHeight, width: width, height: 1))
+        sep3.boxType = .separator
+        visualEffect.addSubview(sep3)
+
+        // ============================================================
+        // FOOTER: project info
+        // ============================================================
         let projectName = extractProjectName(from: cwd)
         let cwdDisplay = abbreviateHome(cwd)
 
         let projectLabel = NSTextField(labelWithString: "")
-        projectLabel.frame = NSRect(x: padding, y: (footerHeight - 18) / 2, width: width * 0.5, height: 18)
+        projectLabel.frame = NSRect(x: padding, y: (footerHeight - 16) / 2, width: width - padding * 2, height: 16)
         projectLabel.lineBreakMode = .byTruncatingMiddle
 
         let projectString = NSMutableAttributedString()
@@ -166,42 +260,43 @@ class PermissionDialog: NSObject, NSApplicationDelegate {
         projectLabel.attributedStringValue = projectString
         visualEffect.addSubview(projectLabel)
 
-        // Allow button (accent pill)
-        let allowBtn = NSButton(frame: NSRect(x: width - padding - 90, y: (footerHeight - 26) / 2, width: 90, height: 26))
-        allowBtn.title = ""
-        allowBtn.isBordered = false
-        allowBtn.wantsLayer = true
-        allowBtn.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
-        allowBtn.layer?.cornerRadius = 6
-        allowBtn.attributedTitle = NSAttributedString(string: "Allow  \u{23CE}", attributes: [
-            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
-            .foregroundColor: NSColor.white
-        ])
-        allowBtn.keyEquivalent = "\r"
-        allowBtn.target = self
-        allowBtn.action = #selector(allow)
-        visualEffect.addSubview(allowBtn)
-
-        // Deny button (subtle pill)
-        let denyBtn = NSButton(frame: NSRect(x: width - padding - 90 - 8 - 80, y: (footerHeight - 26) / 2, width: 80, height: 26))
-        denyBtn.title = ""
-        denyBtn.isBordered = false
-        denyBtn.wantsLayer = true
-        denyBtn.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
-        denyBtn.layer?.cornerRadius = 6
-        denyBtn.attributedTitle = NSAttributedString(string: "Deny  \u{238B}", attributes: [
-            .font: NSFont.systemFont(ofSize: 12, weight: .regular),
-            .foregroundColor: NSColor.secondaryLabelColor
-        ])
-        denyBtn.keyEquivalent = "\u{1b}"
-        denyBtn.target = self
-        denyBtn.action = #selector(deny)
-        visualEffect.addSubview(denyBtn)
+        // --- Apply initial selection highlight ---
+        updateSelection()
 
         // --- Show and activate ---
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        window.makeFirstResponder(window.contentView)
+        window.makeFirstResponder(keyHandler)
+    }
+
+    func moveSelection(_ delta: Int) {
+        selectedIndex = max(0, min(options.count - 1, selectedIndex + delta))
+        updateSelection()
+    }
+
+    func updateSelection() {
+        for (i, rowBg) in rowViews.enumerated() {
+            let isSelected = (i == selectedIndex)
+            rowBg.layer?.backgroundColor = isSelected
+                ? NSColor.controlAccentColor.cgColor
+                : NSColor.clear.cgColor
+
+            labelFields[i].textColor = isSelected ? NSColor.white : NSColor.labelColor
+            labelFields[i].font = isSelected
+                ? NSFont.systemFont(ofSize: 14, weight: .medium)
+                : NSFont.systemFont(ofSize: 14, weight: .regular)
+
+            shortcutFields[i].textColor = isSelected
+                ? NSColor.white.withAlphaComponent(0.8)
+                : NSColor.tertiaryLabelColor
+
+            iconViews[i].contentTintColor = isSelected ? NSColor.white : NSColor.secondaryLabelColor
+        }
+    }
+
+    func confirmSelection() {
+        print(options[selectedIndex].value)
+        NSApp.terminate(nil)
     }
 
     func sfSymbolName(for tool: String) -> String {
@@ -236,16 +331,6 @@ class PermissionDialog: NSObject, NSApplicationDelegate {
             return "~" + path.dropFirst(home.count)
         }
         return path
-    }
-
-    @objc func allow() {
-        print("allow")
-        NSApp.terminate(nil)
-    }
-
-    @objc func deny() {
-        print("deny")
-        NSApp.terminate(nil)
     }
 
     func applicationWillTerminate(_ notification: Notification) {}

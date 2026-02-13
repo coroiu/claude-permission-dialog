@@ -63,11 +63,13 @@ class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var rawInput: String = ""
     var window: NSWindow!
 
-    let options: [OptionRow] = [
+    static let defaultOptions: [OptionRow] = [
         OptionRow(label: "Allow", shortcut: "\u{23CE}", icon: "checkmark.circle", value: "allow"),
         OptionRow(label: "Always Allow", shortcut: "\u{2318}A", icon: "checkmark.circle.badge.checkmark", value: "allow_always"),
         OptionRow(label: "Deny", shortcut: "\u{238B}", icon: "xmark.circle", value: "deny"),
     ]
+    var options: [OptionRow] = defaultOptions
+    var denyValue: String = "deny"
     var selectedIndex = 0
     var rowViews: [NSView] = []
     var labelFields: [NSTextField] = []
@@ -84,6 +86,20 @@ class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             detail = json["detail"] as? String ?? ""
             cwd = json["cwd"] as? String ?? ""
             rawInput = json["raw_input"] as? String ?? ""
+
+            // Custom options override defaults
+            if let customOpts = json["options"] as? [[String: String]], !customOpts.isEmpty {
+                options = customOpts.compactMap { opt in
+                    guard let label = opt["label"], let value = opt["value"] else { return nil }
+                    return OptionRow(
+                        label: label,
+                        shortcut: opt["shortcut"] ?? "",
+                        icon: opt["icon"] ?? "circle",
+                        value: value
+                    )
+                }
+                denyValue = json["deny_value"] as? String ?? "deny"
+            }
         }
 
         let width: CGFloat = 680
@@ -136,8 +152,9 @@ class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         keyHandler.onArrowDown = { [weak self] in self?.moveSelection(1) }
         keyHandler.onConfirm = { [weak self] in self?.confirmSelection() }
         keyHandler.onEscape = { [weak self] in
-            self?.selectedIndex = self?.options.firstIndex(where: { $0.value == "deny" }) ?? 1
-            self?.confirmSelection()
+            guard let s = self else { return }
+            s.selectedIndex = s.options.firstIndex(where: { $0.value == s.denyValue }) ?? (s.options.count - 1)
+            s.confirmSelection()
         }
         keyHandler.onRowClick = { [weak self] index in
             self?.selectedIndex = index
@@ -391,7 +408,7 @@ class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     func confirmSelection() {
         let value = options[selectedIndex].value
-        if value == "deny" {
+        if value == denyValue {
             showReasonInput()
             return
         }
@@ -414,9 +431,9 @@ class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     func submitDeny(reason: String) {
         let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            print("deny")
+            print(denyValue)
         } else {
-            print("deny:\(trimmed)")
+            print("\(denyValue):\(trimmed)")
         }
         NSApp.terminate(nil)
     }
@@ -443,6 +460,7 @@ class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         if lowered == "grep" { return "magnifyingglass" }
         if lowered == "glob" { return "doc.text.magnifyingglass" }
         if lowered == "task" { return "cpu" }
+        if lowered == "exitplanmode" { return "list.clipboard" }
         if lowered.hasPrefix("mcp") { return "puzzlepiece" }
         return "questionmark.circle"
     }

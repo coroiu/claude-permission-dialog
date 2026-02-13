@@ -74,6 +74,9 @@ build_action() {
       pattern=$(echo "$TOOL_INPUT" | jq -r '.pattern // "unknown"')
       printf 'Search file contents for: %s' "$pattern"
       ;;
+    ExitPlanMode)
+      printf 'Review plan'
+      ;;
     mcp__*)
       # Extract a readable name from mcp__server__tool format
       local readable
@@ -144,8 +147,31 @@ build_detail() {
       [ -n "$glob" ] && printf '\nFile filter: %s' "$glob"
       [ -n "$output_mode" ] && printf '\nOutput: %s' "$output_mode"
       ;;
+    ExitPlanMode)
+      local plan
+      plan=$(echo "$TOOL_INPUT" | jq -r '.plan // ""')
+      printf '%s' "$plan"
+      ;;
     *)
       echo "$TOOL_INPUT" | jq -r 'to_entries | map("\(.key): \(.value)") | join("\n")' | head -c 1000
+      ;;
+  esac
+}
+
+# Build custom options JSON for specific tools (null = use defaults)
+build_options() {
+  case "$TOOL_NAME" in
+    ExitPlanMode)
+      cat <<'OPTS'
+[
+  {"label": "Approve plan", "shortcut": "\u23ce", "icon": "checkmark.circle", "value": "allow"},
+  {"label": "Approve with auto-accepted edits", "shortcut": "\u2318A", "icon": "checkmark.circle.badge.checkmark", "value": "allow_accept_edits"},
+  {"label": "Request changes", "shortcut": "\u238b", "icon": "pencil.circle", "value": "deny"}
+]
+OPTS
+      ;;
+    *)
+      echo "null"
       ;;
   esac
 }
@@ -157,16 +183,24 @@ abbreviate_home() {
 
 ACTION=$(build_action)
 DETAIL=$(build_detail)
+OPTIONS=$(build_options)
 
-# Pass data to the Swift dialog via stdin as JSON (include raw input for copy/debug)
-RESULT=$(jq -n \
+# Build base JSON for the Swift dialog
+DIALOG_JSON=$(jq -n \
   --arg tool "$TOOL_NAME" \
   --arg action "$ACTION" \
   --arg detail "$DETAIL" \
   --arg cwd "$CWD" \
   --arg raw "$INPUT" \
-  '{"tool_name": $tool, "action": $action, "detail": $detail, "cwd": $cwd, "raw_input": $raw}' \
-  | "$HOOK_DIR/permission-dialog")
+  '{tool_name: $tool, action: $action, detail: $detail, cwd: $cwd, raw_input: $raw}')
+
+# Add custom options if provided
+if [ "$OPTIONS" != "null" ]; then
+  DIALOG_JSON=$(echo "$DIALOG_JSON" | jq --argjson opts "$OPTIONS" '. + {options: $opts, deny_value: "deny"}')
+fi
+
+# Pass data to the Swift dialog via stdin as JSON
+RESULT=$(echo "$DIALOG_JSON" | "$HOOK_DIR/permission-dialog")
 
 # Extract the first permission_suggestions entry for "Always Allow"
 SUGGESTIONS=$(echo "$INPUT" | jq '.permission_suggestions // []')
@@ -182,7 +216,7 @@ case "$RESULT" in
       }
     }'
     ;;
-  allow_always)
+  allow_always|allow_accept_edits)
     jq -n --argjson perms "$SUGGESTIONS" '{
       hookSpecificOutput: {
         hookEventName: "PermissionRequest",

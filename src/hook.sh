@@ -11,19 +11,24 @@ set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Read the hook input from stdin
-INPUT=$(cat)
+# Save hook input to temp files for reliable jq parsing
+# (avoids issues with echo piping large/complex JSON through shell variables)
+HOOK_INPUT_FILE=$(mktemp)
+TOOL_INPUT_FILE=$(mktemp)
+trap 'rm -f "$HOOK_INPUT_FILE" "$TOOL_INPUT_FILE"' EXIT
 
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // "Unknown"')
-TOOL_INPUT=$(echo "$INPUT" | jq -r '.tool_input // {}')
-CWD=$(echo "$INPUT" | jq -r '.cwd // ""')
+cat > "$HOOK_INPUT_FILE"
+
+TOOL_NAME=$(jq -r '.tool_name // "Unknown"' < "$HOOK_INPUT_FILE")
+jq '.tool_input // {}' < "$HOOK_INPUT_FILE" > "$TOOL_INPUT_FILE"
+CWD=$(jq -r '.cwd // ""' < "$HOOK_INPUT_FILE")
 
 # Build a short, human-readable action description (shown prominently)
 build_action() {
   case "$TOOL_NAME" in
     Bash)
       local desc
-      desc=$(echo "$TOOL_INPUT" | jq -r '.description // empty')
+      desc=$(jq -r '.description // empty' < "$TOOL_INPUT_FILE")
       if [ -n "$desc" ]; then
         printf 'Run command: %s' "$desc"
       else
@@ -32,46 +37,46 @@ build_action() {
       ;;
     Edit)
       local file
-      file=$(echo "$TOOL_INPUT" | jq -r '.file_path // "unknown"')
+      file=$(jq -r '.file_path // "unknown"' < "$TOOL_INPUT_FILE")
       file=$(abbreviate_home "$file")
       printf 'Edit file: %s' "$file"
       ;;
     Write)
       local file
-      file=$(echo "$TOOL_INPUT" | jq -r '.file_path // "unknown"')
+      file=$(jq -r '.file_path // "unknown"' < "$TOOL_INPUT_FILE")
       file=$(abbreviate_home "$file")
       printf 'Write file: %s' "$file"
       ;;
     Read)
       local file
-      file=$(echo "$TOOL_INPUT" | jq -r '.file_path // "unknown"')
+      file=$(jq -r '.file_path // "unknown"' < "$TOOL_INPUT_FILE")
       file=$(abbreviate_home "$file")
       printf 'Read file: %s' "$file"
       ;;
     WebFetch)
       local url
-      url=$(echo "$TOOL_INPUT" | jq -r '.url // "unknown"')
+      url=$(jq -r '.url // "unknown"' < "$TOOL_INPUT_FILE")
       printf 'Fetch URL: %s' "$url"
       ;;
     WebSearch)
       local query
-      query=$(echo "$TOOL_INPUT" | jq -r '.query // "unknown"')
+      query=$(jq -r '.query // "unknown"' < "$TOOL_INPUT_FILE")
       printf 'Web search: %s' "$query"
       ;;
     Task)
       local desc subtype
-      desc=$(echo "$TOOL_INPUT" | jq -r '.description // "unknown"')
-      subtype=$(echo "$TOOL_INPUT" | jq -r '.subagent_type // "unknown"')
+      desc=$(jq -r '.description // "unknown"' < "$TOOL_INPUT_FILE")
+      subtype=$(jq -r '.subagent_type // "unknown"' < "$TOOL_INPUT_FILE")
       printf 'Launch %s agent: %s' "$subtype" "$desc"
       ;;
     Glob)
       local pattern
-      pattern=$(echo "$TOOL_INPUT" | jq -r '.pattern // "unknown"')
+      pattern=$(jq -r '.pattern // "unknown"' < "$TOOL_INPUT_FILE")
       printf 'Search for files matching: %s' "$pattern"
       ;;
     Grep)
       local pattern
-      pattern=$(echo "$TOOL_INPUT" | jq -r '.pattern // "unknown"')
+      pattern=$(jq -r '.pattern // "unknown"' < "$TOOL_INPUT_FILE")
       printf 'Search file contents for: %s' "$pattern"
       ;;
     ExitPlanMode)
@@ -94,24 +99,24 @@ build_detail() {
   case "$TOOL_NAME" in
     Bash)
       local cmd
-      cmd=$(echo "$TOOL_INPUT" | jq -r '.command // "unknown command"')
+      cmd=$(jq -r '.command // "unknown command"' < "$TOOL_INPUT_FILE")
       printf '%s' "$cmd"
       ;;
     Edit)
       local old new
-      old=$(echo "$TOOL_INPUT" | jq -r '.old_string // ""')
-      new=$(echo "$TOOL_INPUT" | jq -r '.new_string // ""')
+      old=$(jq -r '.old_string // ""' < "$TOOL_INPUT_FILE")
+      new=$(jq -r '.new_string // ""' < "$TOOL_INPUT_FILE")
       printf 'Replace:\n%s\n\nWith:\n%s' "$old" "$new"
       ;;
     Write)
       local content
-      content=$(echo "$TOOL_INPUT" | jq -r '.content // ""' | head -c 1000)
+      content=$(jq -r '.content // ""' < "$TOOL_INPUT_FILE" | head -c 1000)
       printf '%s' "$content"
       ;;
     Read)
       local offset limit
-      offset=$(echo "$TOOL_INPUT" | jq -r '.offset // empty')
-      limit=$(echo "$TOOL_INPUT" | jq -r '.limit // empty')
+      offset=$(jq -r '.offset // empty' < "$TOOL_INPUT_FILE")
+      limit=$(jq -r '.limit // empty' < "$TOOL_INPUT_FILE")
       if [ -n "$offset" ] || [ -n "$limit" ]; then
         printf 'Offset: %s, Limit: %s' "${offset:-0}" "${limit:-all}"
       else
@@ -120,40 +125,40 @@ build_detail() {
       ;;
     WebFetch)
       local prompt
-      prompt=$(echo "$TOOL_INPUT" | jq -r '.prompt // ""')
+      prompt=$(jq -r '.prompt // ""' < "$TOOL_INPUT_FILE")
       printf 'Prompt: %s' "$prompt"
       ;;
     WebSearch)
-      echo "$TOOL_INPUT" | jq -r 'to_entries | map("\(.key): \(.value)") | join("\n")'
+      jq -r 'to_entries | map("\(.key): \(.value)") | join("\n")' < "$TOOL_INPUT_FILE"
       ;;
     Task)
       local prompt
-      prompt=$(echo "$TOOL_INPUT" | jq -r '.prompt // ""' | head -c 500)
+      prompt=$(jq -r '.prompt // ""' < "$TOOL_INPUT_FILE" | head -c 500)
       printf '%s' "$prompt"
       ;;
     Glob)
       local path
-      path=$(echo "$TOOL_INPUT" | jq -r '.path // "."')
+      path=$(jq -r '.path // "."' < "$TOOL_INPUT_FILE")
       path=$(abbreviate_home "$path")
       printf 'Path: %s' "$path"
       ;;
     Grep)
       local path glob output_mode
-      path=$(echo "$TOOL_INPUT" | jq -r '.path // "."')
+      path=$(jq -r '.path // "."' < "$TOOL_INPUT_FILE")
       path=$(abbreviate_home "$path")
-      glob=$(echo "$TOOL_INPUT" | jq -r '.glob // empty')
-      output_mode=$(echo "$TOOL_INPUT" | jq -r '.output_mode // empty')
+      glob=$(jq -r '.glob // empty' < "$TOOL_INPUT_FILE")
+      output_mode=$(jq -r '.output_mode // empty' < "$TOOL_INPUT_FILE")
       printf 'Path: %s' "$path"
       [ -n "$glob" ] && printf '\nFile filter: %s' "$glob"
       [ -n "$output_mode" ] && printf '\nOutput: %s' "$output_mode"
       ;;
     ExitPlanMode)
       local plan
-      plan=$(echo "$TOOL_INPUT" | jq -r '.plan // ""')
+      plan=$(jq -r '.plan // ""' < "$TOOL_INPUT_FILE")
       printf '%s' "$plan"
       ;;
     *)
-      echo "$TOOL_INPUT" | jq -r 'to_entries | map("\(.key): \(.value)") | join("\n")' | head -c 1000
+      jq -r 'to_entries | map("\(.key): \(.value)") | join("\n")' < "$TOOL_INPUT_FILE" | head -c 1000
       ;;
   esac
 }
@@ -185,25 +190,31 @@ ACTION=$(build_action)
 DETAIL=$(build_detail)
 OPTIONS=$(build_options)
 
-# Build base JSON for the Swift dialog
-DIALOG_JSON=$(jq -n \
-  --arg tool "$TOOL_NAME" \
-  --arg action "$ACTION" \
-  --arg detail "$DETAIL" \
-  --arg cwd "$CWD" \
-  --arg raw "$INPUT" \
-  '{tool_name: $tool, action: $action, detail: $detail, cwd: $cwd, raw_input: $raw}')
-
-# Add custom options if provided
+# Pass data to the Swift dialog via stdin as JSON
+RAW_INPUT=$(<"$HOOK_INPUT_FILE")
 if [ "$OPTIONS" != "null" ]; then
-  DIALOG_JSON=$(echo "$DIALOG_JSON" | jq --argjson opts "$OPTIONS" '. + {options: $opts, deny_value: "deny"}')
+  RESULT=$(jq -n \
+    --arg tool "$TOOL_NAME" \
+    --arg action "$ACTION" \
+    --arg detail "$DETAIL" \
+    --arg cwd "$CWD" \
+    --arg raw "$RAW_INPUT" \
+    --argjson options "$OPTIONS" \
+    '{tool_name: $tool, action: $action, detail: $detail, cwd: $cwd, raw_input: $raw, options: $options, deny_value: "deny"}' \
+    | "$HOOK_DIR/permission-dialog")
+else
+  RESULT=$(jq -n \
+    --arg tool "$TOOL_NAME" \
+    --arg action "$ACTION" \
+    --arg detail "$DETAIL" \
+    --arg cwd "$CWD" \
+    --arg raw "$RAW_INPUT" \
+    '{tool_name: $tool, action: $action, detail: $detail, cwd: $cwd, raw_input: $raw}' \
+    | "$HOOK_DIR/permission-dialog")
 fi
 
-# Pass data to the Swift dialog via stdin as JSON
-RESULT=$(echo "$DIALOG_JSON" | "$HOOK_DIR/permission-dialog")
-
 # Extract the first permission_suggestions entry for "Always Allow"
-SUGGESTIONS=$(echo "$INPUT" | jq '.permission_suggestions // []')
+SUGGESTIONS=$(jq '.permission_suggestions // []' < "$HOOK_INPUT_FILE")
 
 case "$RESULT" in
   allow)

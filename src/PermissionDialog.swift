@@ -111,14 +111,14 @@ class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
         // --- Measure action text to compute dynamic height ---
         let actionFont = NSFont.systemFont(ofSize: 16, weight: .medium)
-        let textAreaWidth = width - padding - 32 - 12 - padding
+        let iconSize: CGFloat = 32
+        let copyBtnSize: CGFloat = 24
+        let actionLabelWidth = width - padding - iconSize - 12 - copyBtnSize - 8 - padding
         let measureLabel = NSTextField(wrappingLabelWithString: action)
         measureLabel.font = actionFont
         measureLabel.maximumNumberOfLines = 0
-        let measuredSize = measureLabel.sizeThatFits(NSSize(width: textAreaWidth, height: .greatestFiniteMagnitude))
-        let actionHeight = max(measuredSize.height, 24)
-
-        let iconSize: CGFloat = 32
+        let measuredSize = measureLabel.sizeThatFits(NSSize(width: actionLabelWidth, height: .greatestFiniteMagnitude))
+        let actionHeight = measuredSize.height
         let topBlockHeight = max(iconSize, actionHeight)
         let topSectionHeight = padding + topBlockHeight + padding
         let detailHeight: CGFloat = 180
@@ -185,9 +185,6 @@ class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             toolIconView.contentTintColor = NSColor.secondaryLabelColor
         }
         visualEffect.addSubview(toolIconView)
-
-        let copyBtnSize: CGFloat = 24
-        let actionLabelWidth = textAreaWidth - copyBtnSize - 8
 
         let actionLabel = NSTextField(wrappingLabelWithString: action)
         actionLabel.font = actionFont

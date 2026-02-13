@@ -60,6 +60,7 @@ class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var action: String = ""
     var detail: String = ""
     var cwd: String = ""
+    var rawInput: String = ""
     var window: NSWindow!
 
     let options: [OptionRow] = [
@@ -82,6 +83,7 @@ class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             action = json["action"] as? String ?? ""
             detail = json["detail"] as? String ?? ""
             cwd = json["cwd"] as? String ?? ""
+            rawInput = json["raw_input"] as? String ?? ""
         }
 
         let width: CGFloat = 680
@@ -167,6 +169,9 @@ class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
         visualEffect.addSubview(toolIconView)
 
+        let copyBtnSize: CGFloat = 24
+        let actionLabelWidth = textAreaWidth - copyBtnSize - 8
+
         let actionLabel = NSTextField(wrappingLabelWithString: action)
         actionLabel.font = actionFont
         actionLabel.textColor = NSColor.labelColor
@@ -178,9 +183,27 @@ class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         actionLabel.frame = NSRect(
             x: padding + iconSize + 12,
             y: topY + (topSectionHeight - actionHeight) / 2,
-            width: textAreaWidth, height: actionHeight
+            width: actionLabelWidth, height: actionHeight
         )
         visualEffect.addSubview(actionLabel)
+
+        // Copy raw input button
+        let copyBtn = NSButton(frame: NSRect(
+            x: width - padding - copyBtnSize,
+            y: topY + (topSectionHeight - copyBtnSize) / 2,
+            width: copyBtnSize, height: copyBtnSize
+        ))
+        copyBtn.bezelStyle = .inline
+        copyBtn.isBordered = false
+        if let img = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy raw input") {
+            let cfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+            copyBtn.image = img.withSymbolConfiguration(cfg)
+        }
+        copyBtn.contentTintColor = NSColor.tertiaryLabelColor
+        copyBtn.target = self
+        copyBtn.action = #selector(copyRawInput(_:))
+        copyBtn.toolTip = "Copy raw hook input JSON"
+        visualEffect.addSubview(copyBtn)
 
         // ============================================================
         // SEPARATOR
@@ -345,6 +368,24 @@ class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 : NSColor.tertiaryLabelColor
 
             iconViews[i].contentTintColor = isSelected ? NSColor.white : NSColor.secondaryLabelColor
+        }
+    }
+
+    @objc func copyRawInput(_ sender: NSButton) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(rawInput, forType: .string)
+        // Brief visual feedback: swap icon to checkmark
+        if let check = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Copied") {
+            let cfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+            sender.image = check.withSymbolConfiguration(cfg)
+            sender.contentTintColor = NSColor.systemGreen
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            if let original = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy raw input") {
+                let cfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+                sender.image = original.withSymbolConfiguration(cfg)
+                sender.contentTintColor = NSColor.tertiaryLabelColor
+            }
         }
     }
 

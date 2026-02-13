@@ -158,13 +158,14 @@ abbreviate_home() {
 ACTION=$(build_action)
 DETAIL=$(build_detail)
 
-# Pass data to the Swift dialog via stdin as JSON
+# Pass data to the Swift dialog via stdin as JSON (include raw input for copy/debug)
 RESULT=$(jq -n \
   --arg tool "$TOOL_NAME" \
   --arg action "$ACTION" \
   --arg detail "$DETAIL" \
   --arg cwd "$CWD" \
-  '{"tool_name": $tool, "action": $action, "detail": $detail, "cwd": $cwd}' \
+  --arg raw "$INPUT" \
+  '{"tool_name": $tool, "action": $action, "detail": $detail, "cwd": $cwd, "raw_input": $raw}' \
   | "$HOOK_DIR/permission-dialog")
 
 # Extract the first permission_suggestions entry for "Always Allow"

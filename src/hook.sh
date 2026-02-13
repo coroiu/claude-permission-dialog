@@ -192,6 +192,18 @@ case "$RESULT" in
       }
     }'
     ;;
+  deny:*)
+    REASON="${RESULT#deny:}"
+    jq -n --arg reason "$REASON" '{
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        decision: {
+          behavior: "deny",
+          message: $reason
+        }
+      }
+    }'
+    ;;
   *)
     jq -n '{
       hookSpecificOutput: {

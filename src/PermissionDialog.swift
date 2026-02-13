@@ -55,7 +55,7 @@ struct OptionRow {
     let value: String  // what gets printed to stdout
 }
 
-class PermissionDialog: NSObject, NSApplicationDelegate {
+class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var toolName: String = "Unknown"
     var action: String = ""
     var detail: String = ""
@@ -72,6 +72,8 @@ class PermissionDialog: NSObject, NSApplicationDelegate {
     var labelFields: [NSTextField] = []
     var shortcutFields: [NSTextField] = []
     var iconViews: [NSImageView] = []
+    var reasonField: NSTextField!
+    var reasonHintLabel: NSTextField!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let data = FileHandle.standardInput.availableData as Data?,
@@ -258,6 +260,23 @@ class PermissionDialog: NSObject, NSApplicationDelegate {
             shortcutFields.append(shortcut)
         }
 
+        // --- Deny reason input (hidden until user selects Deny) ---
+        let reasonY = footerHeight + optionsHeight / 2
+        reasonField = NSTextField(frame: NSRect(x: padding, y: reasonY, width: width - padding * 2, height: 24))
+        reasonField.placeholderString = "Why deny? (optional)"
+        reasonField.font = NSFont.systemFont(ofSize: 14)
+        reasonField.isHidden = true
+        reasonField.delegate = self
+        reasonField.focusRingType = .none
+        visualEffect.addSubview(reasonField)
+
+        reasonHintLabel = NSTextField(labelWithString: "\u{23CE} Submit  \u{00B7}  \u{238B} Skip")
+        reasonHintLabel.frame = NSRect(x: padding, y: reasonY - 22, width: width - padding * 2, height: 16)
+        reasonHintLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        reasonHintLabel.textColor = NSColor.tertiaryLabelColor
+        reasonHintLabel.isHidden = true
+        visualEffect.addSubview(reasonHintLabel)
+
         // Register row frames for click detection (in keyHandler coordinates)
         for (i, _) in options.enumerated() {
             let rowY = footerHeight + optionsHeight - rowHeight * CGFloat(i + 1)
@@ -330,8 +349,48 @@ class PermissionDialog: NSObject, NSApplicationDelegate {
     }
 
     func confirmSelection() {
-        print(options[selectedIndex].value)
+        let value = options[selectedIndex].value
+        if value == "deny" {
+            showReasonInput()
+            return
+        }
+        print(value)
         NSApp.terminate(nil)
+    }
+
+    func showReasonInput() {
+        // Hide option rows
+        for view in rowViews { view.isHidden = true }
+        for field in labelFields { field.isHidden = true }
+        for field in shortcutFields { field.isHidden = true }
+        for icon in iconViews { icon.isHidden = true }
+        // Show reason input
+        reasonField.isHidden = false
+        reasonHintLabel.isHidden = false
+        window.makeFirstResponder(reasonField)
+    }
+
+    func submitDeny(reason: String) {
+        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            print("deny")
+        } else {
+            print("deny:\(trimmed)")
+        }
+        NSApp.terminate(nil)
+    }
+
+    // Handle Enter and Esc in the reason text field
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+            submitDeny(reason: reasonField.stringValue)
+            return true
+        }
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            submitDeny(reason: "")
+            return true
+        }
+        return false
     }
 
     func sfSymbolName(for tool: String) -> String {

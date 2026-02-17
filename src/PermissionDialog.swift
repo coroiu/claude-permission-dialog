@@ -80,8 +80,8 @@ class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var windowIsKey = true
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if let data = FileHandle.standardInput.availableData as Data?,
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+        let data = FileHandle.standardInput.readDataToEndOfFile()
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             toolName = json["tool_name"] as? String ?? "Unknown"
             action = json["action"] as? String ?? ""
             detail = json["detail"] as? String ?? ""

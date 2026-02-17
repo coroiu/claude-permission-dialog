@@ -10,6 +10,22 @@
 set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+LOG_FILE="$HOOK_DIR/permission-dialog.log"
+
+log() {
+  local ts
+  ts=$(date '+%Y-%m-%d %H:%M:%S')
+  printf '[%s] %s\n' "$ts" "$*" >> "$LOG_FILE"
+}
+
+# Log uncaught errors with line number
+trap_err() {
+  local exit_code=$?
+  log "ERROR: script failed at line $1 with exit code $exit_code"
+  # Dump last 5 lines of context from the script for reference
+  log "ERROR: near: $(sed -n "${1}p" "$0")"
+}
+trap 'trap_err $LINENO' ERR
 
 # Save hook input to temp files for reliable jq parsing
 # (avoids issues with echo piping large/complex JSON through shell variables)
@@ -19,9 +35,20 @@ trap 'rm -f "$HOOK_INPUT_FILE" "$TOOL_INPUT_FILE"' EXIT
 
 cat > "$HOOK_INPUT_FILE"
 
-TOOL_NAME=$(jq -r '.tool_name // "Unknown"' < "$HOOK_INPUT_FILE")
-jq '.tool_input // {}' < "$HOOK_INPUT_FILE" > "$TOOL_INPUT_FILE"
+log "--- new invocation ---"
+log "stdin bytes: $(wc -c < "$HOOK_INPUT_FILE" | tr -d ' ')"
+
+TOOL_NAME=$(jq -r '.tool_name // "Unknown"' < "$HOOK_INPUT_FILE") || {
+  log "ERROR: jq failed parsing tool_name; raw input: $(head -c 500 "$HOOK_INPUT_FILE")"
+  exit 1
+}
+jq '.tool_input // {}' < "$HOOK_INPUT_FILE" > "$TOOL_INPUT_FILE" || {
+  log "ERROR: jq failed parsing tool_input"
+  exit 1
+}
 CWD=$(jq -r '.cwd // ""' < "$HOOK_INPUT_FILE")
+
+log "tool=$TOOL_NAME cwd=$CWD"
 
 # Build a short, human-readable action description (shown prominently)
 build_action() {
@@ -190,34 +217,60 @@ ACTION=$(build_action)
 DETAIL=$(build_detail)
 OPTIONS=$(build_options)
 
+log "action=$ACTION"
+log "detail=$(echo "$DETAIL" | head -c 200)"
+log "options=$OPTIONS"
+
 # Pass data to the Swift dialog via stdin as JSON
 RAW_INPUT=$(<"$HOOK_INPUT_FILE")
+DIALOG_STDERR_FILE=$(mktemp)
+trap 'rm -f "$HOOK_INPUT_FILE" "$TOOL_INPUT_FILE" "$DIALOG_STDERR_FILE"' EXIT
+
 if [ "$OPTIONS" != "null" ]; then
-  RESULT=$(jq -n \
+  DIALOG_JSON=$(jq -n \
     --arg tool "$TOOL_NAME" \
     --arg action "$ACTION" \
     --arg detail "$DETAIL" \
     --arg cwd "$CWD" \
     --arg raw "$RAW_INPUT" \
     --argjson options "$OPTIONS" \
-    '{tool_name: $tool, action: $action, detail: $detail, cwd: $cwd, raw_input: $raw, options: $options, deny_value: "deny"}' \
-    | "$HOOK_DIR/permission-dialog")
+    '{tool_name: $tool, action: $action, detail: $detail, cwd: $cwd, raw_input: $raw, options: $options, deny_value: "deny"}') || {
+    log "ERROR: jq failed building dialog JSON (with options)"
+    exit 1
+  }
 else
-  RESULT=$(jq -n \
+  DIALOG_JSON=$(jq -n \
     --arg tool "$TOOL_NAME" \
     --arg action "$ACTION" \
     --arg detail "$DETAIL" \
     --arg cwd "$CWD" \
     --arg raw "$RAW_INPUT" \
-    '{tool_name: $tool, action: $action, detail: $detail, cwd: $cwd, raw_input: $raw}' \
-    | "$HOOK_DIR/permission-dialog")
+    '{tool_name: $tool, action: $action, detail: $detail, cwd: $cwd, raw_input: $raw}') || {
+    log "ERROR: jq failed building dialog JSON"
+    exit 1
+  }
 fi
+
+log "dialog JSON bytes: $(echo "$DIALOG_JSON" | wc -c | tr -d ' ')"
+
+RESULT=$(echo "$DIALOG_JSON" | "$HOOK_DIR/permission-dialog" 2>"$DIALOG_STDERR_FILE") || {
+  log "ERROR: permission-dialog binary exited with code $?"
+  log "ERROR: binary stderr: $(cat "$DIALOG_STDERR_FILE")"
+  exit 1
+}
+
+if [ -s "$DIALOG_STDERR_FILE" ]; then
+  log "WARN: binary stderr: $(cat "$DIALOG_STDERR_FILE")"
+fi
+
+log "result=$RESULT"
 
 # Extract the first permission_suggestions entry for "Always Allow"
 SUGGESTIONS=$(jq '.permission_suggestions // []' < "$HOOK_INPUT_FILE")
 
 case "$RESULT" in
   allow)
+    log "decision=allow"
     jq -n '{
       hookSpecificOutput: {
         hookEventName: "PermissionRequest",
@@ -228,6 +281,7 @@ case "$RESULT" in
     }'
     ;;
   allow_always|allow_accept_edits)
+    log "decision=allow (updatedPermissions, result=$RESULT)"
     jq -n --argjson perms "$SUGGESTIONS" '{
       hookSpecificOutput: {
         hookEventName: "PermissionRequest",
@@ -240,6 +294,7 @@ case "$RESULT" in
     ;;
   deny:*)
     REASON="${RESULT#deny:}"
+    log "decision=deny reason=$REASON"
     jq -n --arg reason "$REASON" '{
       hookSpecificOutput: {
         hookEventName: "PermissionRequest",
@@ -251,6 +306,7 @@ case "$RESULT" in
     }'
     ;;
   *)
+    log "decision=deny (fallback, raw result=$RESULT)"
     jq -n '{
       hookSpecificOutput: {
         hookEventName: "PermissionRequest",
@@ -262,4 +318,5 @@ case "$RESULT" in
     }'
     ;;
 esac
+log "done"
 exit 0

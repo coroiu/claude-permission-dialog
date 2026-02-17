@@ -77,6 +77,7 @@ class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var iconViews: [NSImageView] = []
     var reasonField: NSTextField!
     var reasonHintLabel: NSTextField!
+    var windowIsKey = true
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let data = FileHandle.standardInput.availableData as Data?,
@@ -191,6 +192,7 @@ class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         actionLabel.textColor = NSColor.labelColor
         actionLabel.lineBreakMode = .byWordWrapping
         actionLabel.maximumNumberOfLines = 0
+        actionLabel.isSelectable = false
         actionLabel.drawsBackground = false
         actionLabel.isBezeled = false
         actionLabel.isEditable = false
@@ -351,6 +353,16 @@ class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         projectLabel.attributedStringValue = projectString
         visualEffect.addSubview(projectLabel)
 
+        // --- Track window key status to dim selection when inactive ---
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(windowDidBecomeKey),
+            name: NSWindow.didBecomeKeyNotification, object: window
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(windowDidResignKey),
+            name: NSWindow.didResignKeyNotification, object: window
+        )
+
         // --- Apply initial selection highlight ---
         updateSelection()
 
@@ -365,11 +377,22 @@ class PermissionDialog: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         updateSelection()
     }
 
+    @objc func windowDidBecomeKey(_ notification: Notification) {
+        windowIsKey = true
+        updateSelection()
+    }
+
+    @objc func windowDidResignKey(_ notification: Notification) {
+        windowIsKey = false
+        updateSelection()
+    }
+
     func updateSelection() {
+        let accentColor = windowIsKey ? NSColor.controlAccentColor : NSColor.systemGray
         for (i, rowBg) in rowViews.enumerated() {
             let isSelected = (i == selectedIndex)
             rowBg.layer?.backgroundColor = isSelected
-                ? NSColor.controlAccentColor.cgColor
+                ? accentColor.cgColor
                 : NSColor.clear.cgColor
 
             labelFields[i].textColor = isSelected ? NSColor.white : NSColor.labelColor

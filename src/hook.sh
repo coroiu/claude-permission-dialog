@@ -50,6 +50,14 @@ CWD=$(jq -r '.cwd // ""' < "$HOOK_INPUT_FILE")
 
 log "tool=$TOOL_NAME cwd=$CWD"
 
+# Tools that should bypass the dialog and use the default terminal UI
+case "$TOOL_NAME" in
+  AskUserQuestion)
+    log "bypassing dialog (terminal-handled tool)"
+    exit 0
+    ;;
+esac
+
 # Build a short, human-readable action description (shown prominently)
 build_action() {
   case "$TOOL_NAME" in
